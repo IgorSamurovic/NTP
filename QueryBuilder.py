@@ -2,12 +2,14 @@
     Igor Samurovic SL23/13 - FTN - Novi Sad - Serbia """
 from weakref import WeakKeyDictionary
 from collections import Iterable
+import re
 
 class Query():
-    """ The main Query class. Used to instantiate and format new Queries. """
+    """ The main Query class.
+    To be treated as an abstract class and not directly instantiated. """
 
-    class QueryPart(object):
-        """ Corresponds to parts of the Query object. """
+    class Part(object):
+        """ Corresponds to parts of the Query object preceeded by keywords (such as INSERT, LIMIT, etc). """
 
         def __init__(self, keyword, separator=","):
             """ Initializes the value of the encapsulated attribute. """
@@ -17,109 +19,184 @@ class Query():
             self.data = WeakKeyDictionary()
 
         def __get__(self, instance, objtype):
-            """ Gets the value of the encapsulated attribute. """
+            """ Gets the value of the encapsulated attribute. If no data has been added, then it will be assumed the part
+                ultimatelly is not used, thus returning an empty string. """
             if self.data[instance] != self.default:
-                return "%s %s" % (self.keyword, self.data[instance])
+                if len(self.keyword) > 0:
+                    return "%s %s" % (self.keyword, self.data[instance])
+                else:
+                    # if it's a dummy keyword return the data only
+                    return self.data[instance]
             return ""
 
         def format_string(self, string):
-            """ Formats the QueryPart string to remove artifacts. """
-            return string.replace(" , ", ", ")
+            """ A helper method that formats the string to remove artifacts. """
+            return re.sub(' +',' ', string.replace(" , ", ", "))
 
         def __set__(self, instance, value):
             """ Sets the value of the encapsulated attribute. """
             if isinstance(value, str):
-                self.data[instance] = value
+                self.data[instance] = self.format_string(value)
             elif isinstance(value, Iterable):
-                self.data[instance] = self.format_string(self.separator.join(value))
+                self.data[instance] = self.format_string(self.separator.join(x for x in value if len(x) > 0))
             else:
                 self.data[instance] = ""
 
-    def where_and(self, value):
-        """ Appends an entry with the AND conditional to the "where" part of the query.
-            Returns the Query object. """
-        if self.where_part:
-            self.where_part += " AND %s" % (value, )
+    def format(self, parts, data=None):
+        """ Formats the input string or iterable using a provided dictionary, :%s values will be replaced by provided values. """
+        if isinstance(parts, str):
+            string = parts
+        elif isinstance(parts, Iterable):
+            string = " ".join(x for x in parts if len(x) > 0)
         else:
-            self.where_part += "WHERE %s"  % (value, )
-        return self
+            string = ""
 
-    def where_or(self, value):
-        """ Appends an entry with the OR conditional to the "where" part of the query.
-            Returns the Query object. """
-        if self.where_part:
-            self.where_part += " OR %s" % (value, )
-        else:
-            self.where_part += "WHERE %s"  % (value, )
-        return self
+        if data is not None:
+            if isinstance(data, dict):
+                for key in data.keys():
+                    string = string.replace(":%s" % (key,), "'%s'" % (data[key], ))
+            else:
+                raise TypeError("If provided, the Data argument must be a dictionary.")
+        return string
 
-    def query_string(self, data=None):
-        """ Joins all parts of the query. Attempts to replace temporary parts of the query (denoted as starting with ":") with the dictionary entries.
-            Returns the joined and formatted query string. """
-        self._query_string = " ".join([self.select_part, self.where_part, self.order_by_part, self.limit_part])
-        if isinstance(data, dict):
-            for key in data.keys():
-                self._query_string = self._query_string.replace(":%s" % (key,), "'%s'" % (data[key], ))
-        return self._query_string
 
-    def select(self, val):
-        """ Sets the "select" part of the query up until "where". If the passed value is a string, it is combined with a keyword
-        without any formatting. If the passed value is a collection, it will be formatted and joined.
-        Potential joins are to be added in this section.
-        Returns the Query object. """
-        self.select_part = val
-        return self
+class Condition():
+    where_part = Query.Part("WHERE", "AND")
 
     def where(self, val):
         """ Sets the "where" part of the query up until "order by". If the passed value is a string, it is combined with a keyword
-        without any formatting. If the passed value is a collection, it will be formatted and joined.
+        without any formatting. If the passed value is a collection, it will be formatted and joined with ANDs.
         Returns the Query object. """
         self.where_part = val
         return self
 
-    def order_by(self, val):
+    def _or(self, val, predicate_check = True):
+        if predicate_check:
+            self.where_part += " OR " + val
+        return self
+
+    def _and(self, val, predicate_check = True):
+        if predicate_check:
+            self.where_part += " AND " + val
+        return self
+
+    def where_id(self, id = ":id"):
+        """ Sets the "where" part to simply be an identificator. """
+        if id != ":id":
+            try:
+                if int(id) != float(id):
+                    raise TypeError("ID value must be an integer.")
+            except:
+                raise TypeError("ID value must be an integer.")
+                
+        self.where_part = "id == %s" % (id, )
+        return self
+
+class SelectQuery(Query, Condition):
+    select_part = Query.Part("SELECT")
+    order_by_part = Query.Part("ORDER BY")
+    order_part = Query.Part("")
+    limit_part = Query.Part("LIMIT")
+
+    def __init__(self, select_part_text):
+        if select_part_text is not None:
+            self.select_part = select_part_text
+
+    def render(self, data):
+        """ Renders the query to string considering the data provided for formatting. """
+        return self.format([self.select_part, self.where_part, self.order_by_part, self.order_part, self.limit_part], data)
+
+    def order_by(self, columns, asc):
         """ Sets the "order by" part of the query up until "limit". If the passed value is a string, it is combined with a keyword
-        without any formatting. If the passed value is a collection, it will be formatted and joined.
+        without any formatting. If the passed value is a collection, it will be formatted and joined. The asc boolean argument decides the order.
         Returns the Query object. """
-        self.order_by_part = val
+        self.order_by_part = columns
+        if asc == True:
+            self.order_part = "ASC"
+        else:
+            self.order_part = "DESC"
         return self
 
-    def limit(self, val):
-        """ Sets the "limit" part of the query. If the passed value is a string, it is combined with a keyword
-        without any formatting. If the passed value is a collection, it will be formatted and joined.
+    def limit(self, val, offset=None):
+        """ Sets the "limit" part of the query. Value and offset arguments are each checked and passed into the query.
         Returns the Query object. """
-        self.limit_part = val
+
+        text = ""
+        try:
+            part = int(val)
+            if int(val) != float(val):
+                raise TypeError("Limit value must be an integer.")
+        except:
+            raise TypeError("Limit value must be an integer.")
+
+        text = str(val)
+        
+        if offset is not None:
+            try:
+                offset = int(offset)
+            except:
+                raise TypeError("Offset value must be an integer.")
+
+            text += ", " + str(offset)
+        
+        self.limit_part = text
         return self
 
-    select_part = QueryPart("SELECT")
-    where_part = QueryPart("WHERE", "AND")
-    order_by_part = QueryPart("ORDER BY")
-    limit_part = QueryPart("LIMIT")
+class InsertQuery(Query, Condition):
+    insert_part = Query.Part("INSERT INTO")
+    values_part = Query.Part("VALUES")
 
-    def apply_dict_data(self, data):
-        """ Applies the dictionary entries to fitting query parts. """
-        self.select_part = data["select"] if data["select"] else None
-        self.where_part = data["where"] if data["where"] else None
-        self.order_by_part = data["order_by"] if data["order_by"] else None
-        self.limit_part = data["limit"] if data["limit"] else None
+    def __init__(self, table_name, columns):
+        self.insert_part = table_name + " (" + ", ".join(columns) + ")"
+        self.values_part = "(" + ", ".join(":" + x for x in columns) + ")"        
 
-    def __init__(self, data=None):
-        """ Initializes a new Query object. """
-        self._query_string = ""
-        self.select_part = None
-        self.where_part = None
-        self.order_by_part = None
-        self.limit_part = None
+    def render(self, data):
+        return self.format([self.insert_part, self.values_part], data)
 
-        if data and isinstance(data, dict):
-            self.apply_dict_data(data)
+class UpdateQuery(Query, Condition):
+    update_part = Query.Part("UPDATE")
+    values_part = Query.Part("SET")
 
+    def __init__(self, table_name, columns):
+        self.update_part = table_name
+        self.values_part = ((x + " = :" + x) for x in columns)
 
-#Testing
-def test():
-    """ A simple function used for testing. """
-    tmp = Query().select("* FROM USER u").where(["u.id = :id", "u.avg > :avg"]).order_by("u.id ASC").limit(["10", "5"])
+    def render(self, data):
+        return self.format([self.update_part, self.values_part, self.where_part], data)
 
-    print(tmp.query_string({"id": 5, "avg": 6.6}))
+class UpdateQuery(Query, Condition):
+    update_part = Query.Part("UPDATE")
+    values_part = Query.Part("SET")
 
-test()
+    def __init__(self, table_name, columns):
+        self.update_part = table_name
+        self.values_part = ((x + " = :" + x) for x in columns)
+
+    def render(self, data):
+        return self.format(" ".join([self.update_part, self.values_part, self.where_part]), data)
+
+class DeleteQuery(Query, Condition):
+    delete_part = Query.Part("DELETE FROM")
+
+    def __init__(self, table_name):
+        self.delete_part = table_name
+
+    def render(self, data):
+        return self.format(" ".join([self.delete_part, self.where_part]), data)
+
+# Testing block
+if __name__ == "__main__":
+    
+    query = InsertQuery("USER", ["name", "surname"])
+    print(query.render({"name": "igor", "surname": "samurovic"}))
+
+    query = UpdateQuery("USER", ["name", "surname"]).where_id(5)
+    print(query.render({"name" : "Rogi", "surname" : "Civorumas", "id" : 1}))
+
+    grades_matter = True
+    query = SelectQuery("* FROM USER u").where("u.id == :id")._and("(u.avg > :avg1 AND u.avg < :avg2)", grades_matter).order_by(["u.name", "u.surname"], True).limit(10)
+    print(query.render({"id": 5, "avg1": 6.6, "avg2": 9.2}))
+
+    query = DeleteQuery("USER").where_id()
+    print(query.render({"id":5}))
+

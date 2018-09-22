@@ -7,7 +7,7 @@
   ([strings]
    (reduce (fn [current bonus] 
              (str (name current) ", " (name bonus))) strings))
-  ([strings joiner]
+  ([strings joiner] 
    (reduce (fn [current bonus] 
              (str (name current) joiner (name bonus))) strings)))
 
@@ -35,6 +35,24 @@
   ([& args]
    (str "SELECT " 
      (chain args))))
+
+(defn INSERT_INTO [table & args]
+  (str "INSERT INTO " table " ("
+    (chain args) ")"))
+
+(defn VALUES [qry & args]
+  (str qry " VALUES (" 
+    (chain args) ")"))
+
+(defn SET [qry & args]
+  (str qry " SET " 
+    (chain args)))
+
+(defn UPDATE [table]
+  (str "UPDATE " table))
+
+(defn DELETE_FROM [table]
+  (str "DELETE FROM " table))
 
 (defn FROM [qry table]
   (str qry " FROM " table))
@@ -75,7 +93,7 @@
    (str qry " LIMIT " num ", " offset)))
 
 (defn EQUAL [a b]
-  (COMPARATOR a "=" b))
+  (COMPARATOR a "==" b))
 
 (defn NOT_EQUAL [a b]
   (COMPARATOR a "!=" b))
@@ -103,19 +121,38 @@
                               
 
 (defn -main []
-  (println "TEST QUERY: \n")
+  (println "\nSELECT TEST QUERY: \n")
   (println (->
-               (SELECT :u.id :v.id :u.username :v.username)
-               (FROM "User u")
-               (JOIN :left "User v" 
-                 (ON
-                  (OR
-                   (EQUAL :u.username :v.username)
-                   (EQUAL :u.email :v.email))))
-               (WHERE 
-                 (NOT_EQUAL :u.id :v.id))
-               (ORDER_BY :!u.id  :u.username)
-               (LIMIT 2))))
+              (SELECT :u.id :v.id :u.username :v.username)
+              (FROM "User u")
+              (JOIN :left "User v" 
+                (ON
+                (OR
+                  (EQUAL :u.username :v.username)
+                  (EQUAL :u.email :v.email))))
+              (WHERE 
+                (NOT_EQUAL :u.id :v.id))
+              (ORDER_BY :!u.id  :u.username)
+              (LIMIT 2)))
+              
+  (println "\nINSERT TEST QUERY: \n")
+  (println (->
+              (INSERT_INTO "User" :username :email)
+              (VALUES "igor93" "igorsamurovic@hotmail.com")))         
 
+  (println "\nUPDATE TEST QUERY: \n")
+  (println (->
+              (UPDATE "User")
+              (SET "username=Igor93" "email=igorsamurovic@gmail.com")
+              (WHERE 
+                (EQUAL :id :1))))
 
+  (println "\nDELETE TEST QUERY: \n")
+  (println (->
+              (DELETE_FROM "User")
+              (WHERE 
+                (EQUAL :id :1))))
+              
+
+)
 
